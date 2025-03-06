@@ -1,5 +1,5 @@
 /*
-   Copyright 2007-2011 Ian Young
+   Copyright 2007-2024 Ian Young and contributors
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -45,129 +45,116 @@ String.prototype.trim = function () {
 };
 
 // Gets the name of the author a given result is associated with
-function getAuthor(node) {
-    var links = node.getElementsByTagName('a');
+const getAuthor = (node) => {
+    const links = node.getElementsByTagName('a');
     return links[0].textContent;
-}
-
-// Check given item against all members of the given array. Returns true if the item is found in the array
-function arrayContains(arr, obj) {
-    if (!arr) return false;
-    for (var i=0; i<arr.length; i++) {
-        if (arr[i].trim() == obj.trim()) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Reset the username and history (simulate a fresh install)
-function resetValues(e) {
-    if (window.confirm("Reset username and saved planlove?")) {
-        localStorage.removeItem("username");
-        localStorage.removeItem("planloveHash" + guessUsername);
-    }
-}
-
-// Do not count new planlove as read
-function saveOldlove() {
-    localStorage.setItem("planloveHash" + guessUsername, JSON.stringify(oldlove));
-}
-
-// Compatibility proxy to only run Greasemonkey commands when in Greasemonkey.
-var rootScope = this;
-var Greasy = {
-  registerMenuCommand: function(a, b, c) {
-    if (typeof GM_registerMenuCommand != 'undefined') {
-      GM_registerMenuCommand(a, b, c);
-    }
-  }
-  , log: function(message) {
-    if (typeof GM_log != 'undefined') {
-      GM_log(message);
-    }
-  }
 };
 
-(function() {
-  // Figure out if this is actually the quicklove page, as opposed to
-  // a regular search. Hackity hack!
-  username = localStorage.getItem("username");
+// Check given item against all members of the given array
+const arrayContains = (arr, obj) => {
+    if (!arr) return false;
+    return arr.some(item => item.trim() === obj.trim());
+};
 
-  // We need to determine the username. Let's make a guess based on
-  // the current url of the page.
-  var urly = window.location.href;
-  var startIndex = urly.indexOf("mysearch=") + 9;
-  var endIndex = urly.indexOf("&", startIndex);
-  var guessUsername = urly.substring(startIndex, endIndex);
-  if (!username) {
-      // Ask for confirmation of the username
-      username = window.prompt("What's your username?\n\nIf you want to stalk other people's newlove as well as your own, enter 'everyone' here.", guessUsername).toLowerCase();
-      if (!username) return false; // give up
-      localStorage.setItem("username", username);
-  }
-  // Now, if the page we're currently on isn't searching for that
-  // username, fuggedaboudit.
-  if (username != guessUsername && username != "everyone") {
-      Greasy.log("False alarm, this isn't a quicklove page. Exiting.");
-      return false;
-  }
+// Reset the username and history (simulate a fresh install)
+const resetValues = async () => {
+    if (window.confirm("Reset username and saved planlove?")) {
+        await browser.storage.local.remove(["username", `planloveHash${guessUsername}`]);
+    }
+};
 
-  // Add items to the menu
-  Greasy.registerMenuCommand("Reset username", resetValues, "", "", "R");
-  Greasy.registerMenuCommand("Save as unread", saveOldlove, "", "", "u");
+// Do not count new planlove as read
+const saveOldlove = async () => {
+    await browser.storage.local.set({ [`planloveHash${guessUsername}`]: JSON.stringify(oldlove) });
+};
 
-  // Find all 'sub-lists' in the page
-  var loves = document.evaluate(
-          '//ul[@id="search_results"]/li//ul/li',
-          document,
-          null,
-          XPathResult.UNORDERED_NODE_ITERATOR_TYPE,
-          null);
+// Main function
+(async () => {
+    // Get the username from the URL
+    const url = new URL(window.location.href);
+    const guessUsername = url.searchParams.get("mysearch");
 
-  // Get the stored planlove from last time
-  oldlove_str = localStorage.getItem("planloveHash" + guessUsername);
+    // Get stored username
+    const { username: storedUsername } = await browser.storage.local.get("username");
+    let username = storedUsername;
 
-  // Convert from the stored string to a hashtable of arrays
-  try {
-      var oldlove = JSON.parse( oldlove_str );
-      // Test it to see if it's null
-      oldlove["foo"];
-  } catch (e) {
-      var oldlove = {};
-  }
+    if (!username) {
+        // Ask for confirmation of the username
+        username = window.prompt(
+            "What's your username?\n\nIf you want to stalk other people's newlove as well as your own, enter 'everyone' here.",
+            guessUsername
+        )?.toLowerCase();
 
-  // A running list of all quicklove received
-  var newlove = {};
-  // Read quicklove, to be hidden
-  var toRemove = []
+        if (!username) return;
+        await browser.storage.local.set({ username });
+    }
 
-  // Iterate through the list of search results
-  var thisLoveNode;
-  while ( thisLoveNode = loves.iterateNext() ) {
-      var author = getAuthor(thisLoveNode.parentNode.parentNode);
+    // Exit if not on the right page
+    if (username !== guessUsername && username !== "everyone") {
+        console.log("False alarm, this isn't a quicklove page. Exiting.");
+        return;
+    }
 
-      thisLoveText = thisLoveNode.textContent;
+    // Find all 'sub-lists' in the page
+    const loves = document.evaluate(
+        '//ul[@id="search_results"]/li//ul/li',
+        document,
+        null,
+        XPathResult.UNORDERED_NODE_ITERATOR_TYPE,
+        null
+    );
 
-      // Check each lovin' against list of author's previous lovin'
-      if (arrayContains(oldlove[author], thisLoveText)) {
-          // Mark for removal
-          toRemove.push( thisLoveNode );
-      }
+    // Get the stored planlove from last time
+    const { [`planloveHash${guessUsername}`]: oldloveStr } = await browser.storage.local.get(`planloveHash${guessUsername}`);
+    let oldlove = {};
+    try {
+        oldlove = JSON.parse(oldloveStr) || {};
+    } catch (e) {
+        console.warn('Error parsing stored planlove:', e);
+    }
 
-      // Fetch the array of planlove for the current author
-      var temp_arr = newlove[author];
-      // Create it if it doesn't exist
-      if (!newlove[author]) { newlove[author] = []; }
-      // Add it to the new list of planlove
-      newlove[author].push( thisLoveText );
-  }
+    // A running list of all quicklove received
+    const newlove = {};
+    // Read quicklove, to be hidden
+    const toRemove = [];
 
-  // Now remove all old love
-  toRemove.forEach( function( n ) {
-      n.parentNode.removeChild( n );
-  });
+    // Iterate through the list of search results
+    let thisLoveNode;
+    while (thisLoveNode = loves.iterateNext()) {
+        const author = getAuthor(thisLoveNode.parentNode.parentNode);
+        const thisLoveText = thisLoveNode.textContent;
 
-  // Store the new list of planlove, for next time
-  localStorage.setItem("planloveHash" + guessUsername, JSON.stringify(newlove));
-})()
+        // Check each lovin' against list of author's previous lovin'
+        if (arrayContains(oldlove[author], thisLoveText)) {
+            // Mark for removal
+            toRemove.push(thisLoveNode);
+        }
+
+        // Initialize array for author if it doesn't exist
+        if (!newlove[author]) {
+            newlove[author] = [];
+        }
+        // Add it to the new list of planlove
+        newlove[author].push(thisLoveText);
+    }
+
+    // Remove all old love
+    toRemove.forEach(node => node.remove());
+
+    // Store the new list of planlove
+    await browser.storage.local.set({ [`planloveHash${guessUsername}`]: JSON.stringify(newlove) });
+
+    // Add context menu
+    browser.runtime.onInstalled?.addListener(() => {
+        browser.contextMenus?.create({
+            id: "reset-values",
+            title: "Reset username",
+            contexts: ["action"]
+        });
+        browser.contextMenus?.create({
+            id: "save-unread",
+            title: "Save as unread",
+            contexts: ["action"]
+        });
+    });
+})();
