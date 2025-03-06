@@ -21,4 +21,4 @@
         // Firefox already has the browser.* namespace
         global.browser = browser;
     }
-})(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this); 
+})(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this);
