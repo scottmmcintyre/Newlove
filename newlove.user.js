@@ -21,7 +21,7 @@
 // 1.2 - Erin [nichols] reworked this to work in Chrome!
 // 1.3 - Use native JSON for storage, fix problems with FF4
 // 1.4 - Updates for GreaseMonkey 3.0
-// 2.0 - Updates for Firefox 109
+// 2.0 - Updates for Chromium Manifest V3, native Firefox extension
 // ==UserScript==
 // @name           NewLove
 // @version        2.0.0
