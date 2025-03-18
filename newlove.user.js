@@ -21,7 +21,7 @@
 // 1.2 - Erin [nichols] reworked this to work in Chrome!
 // 1.3 - Use native JSON for storage, fix problems with FF4
 // 1.4 - Updates for GreaseMonkey 3.0
-// 2.0 - Updates for Chromium Manifest V3, native Firefox extension
+// 2.0 - Updates for Chromium Manifest V3, native Firefox extension, buttons to replace context menu
 // ==UserScript==
 // @name           NewLove
 // @version        2.0.0
@@ -36,8 +36,6 @@
 // @match          https://www.grinnellplans.com/search.php?mysearch=*&planlove=1*
 // @include        https://grinnellplans.com/search.php?mysearch=*&planlove=1*
 // @match          https://grinnellplans.com/search.php?mysearch=*&planlove=1*
-// @grant          GM_registerMenuCommand
-// @grant          GM_log
 // ==/UserScript==
 
 /* Credit Douglas Crockford <http://javascript.crockford.com/remedial.html> */
@@ -57,20 +55,67 @@ const arrayContains = (arr, obj) => {
     return arr.some(item => item.trim() === obj.trim());
 };
 
-// Reset the username and history (simulate a fresh install)
-const resetValues = async () => {
-    if (window.confirm("Reset username and saved planlove?")) {
+// Add control buttons to the page
+const addControlButtons = () => {
+    // Find the planlove checkbox and label
+    const planloveCheckbox = document.querySelector('input[name="planlove"]');
+    if (!planloveCheckbox) return;
+
+    // Find the text node containing "Planlove"
+    let labelNode = planloveCheckbox.parentNode.lastChild;
+    if (!labelNode) return;
+
+    // Create container for buttons
+    const buttonContainer = document.createElement('span');
+    buttonContainer.style.marginLeft = '10px';
+    buttonContainer.style.display = 'inline-flex';
+    buttonContainer.style.alignItems = 'center';
+    buttonContainer.style.gap = '5px';
+
+    // Create Reset Username button
+    const resetButton = document.createElement('button');
+    resetButton.textContent = 'Reset Username';
+    resetButton.style.margin = '0';
+    resetButton.onclick = async () => {
+        const url = new URL(window.location.href);
+        const guessUsername = url.searchParams.get("mysearch");
         await browser.storage.local.remove(["username", `planloveHash${guessUsername}`]);
+        window.location.reload();
+    };
+
+    // Create Save as Unread button
+    const saveButton = document.createElement('button');
+    saveButton.textContent = 'Save as Unread';
+    saveButton.style.margin = '0';
+    saveButton.onclick = async () => {
+        const url = new URL(window.location.href);
+        const guessUsername = url.searchParams.get("mysearch");
+        const { [`planloveHash${guessUsername}`]: currentLove } = await browser.storage.local.get(`planloveHash${guessUsername}`);
+        await browser.storage.local.set({ [`planloveHash${guessUsername}`]: JSON.stringify(currentLove || {}) });
+    };
+
+    // Add buttons to container
+    buttonContainer.appendChild(resetButton);
+    buttonContainer.appendChild(saveButton);
+
+    // Add container after the label
+    labelNode.parentNode.appendChild(buttonContainer);
+};
+
+// Toggle visibility of hidden planlove for an author
+const toggleHiddenLove = (author, hiddenLoveContainer) => {
+    if (hiddenLoveContainer.style.display === 'none') {
+        hiddenLoveContainer.style.display = 'block';
+    } else {
+        hiddenLoveContainer.style.display = 'none';
     }
 };
 
-// Do not count new planlove as read
-const saveOldlove = async () => {
-    await browser.storage.local.set({ [`planloveHash${guessUsername}`]: JSON.stringify(oldlove) });
-};
-
 // Main function
-(async () => {
+const init = async () => {
+    // Add control buttons to the page
+    addControlButtons();
+
     // Get the username from the URL
     const url = new URL(window.location.href);
     const guessUsername = url.searchParams.get("mysearch");
@@ -109,7 +154,9 @@ const saveOldlove = async () => {
     const { [`planloveHash${guessUsername}`]: oldloveStr } = await browser.storage.local.get(`planloveHash${guessUsername}`);
     let oldlove = {};
     try {
-        oldlove = JSON.parse(oldloveStr) || {};
+        if (oldloveStr) {
+            oldlove = JSON.parse(oldloveStr);
+        }
     } catch (e) {
         console.warn('Error parsing stored planlove:', e);
     }
@@ -117,7 +164,7 @@ const saveOldlove = async () => {
     // A running list of all quicklove received
     const newlove = {};
     // Read quicklove, to be hidden
-    const toRemove = [];
+    const toHide = [];
 
     // Iterate through the list of search results
     let thisLoveNode;
@@ -127,8 +174,8 @@ const saveOldlove = async () => {
 
         // Check each lovin' against list of author's previous lovin'
         if (arrayContains(oldlove[author], thisLoveText)) {
-            // Mark for removal
-            toRemove.push(thisLoveNode);
+            // Mark for hiding instead of removal
+            toHide.push(thisLoveNode);
         }
 
         // Initialize array for author if it doesn't exist
@@ -139,23 +186,50 @@ const saveOldlove = async () => {
         newlove[author].push(thisLoveText);
     }
 
-    // Remove all old love
-    toRemove.forEach(node => node.remove());
+    // Instead of removing old love, hide it and add toggle buttons
+    const authorContainers = new Map();
+    toHide.forEach(node => {
+        const author = getAuthor(node.parentNode.parentNode);
+        if (!authorContainers.has(author)) {
+            // Create container for hidden entries
+            const container = document.createElement('div');
+            container.style.display = 'none';
+            container.className = 'hidden-love-container';
+            
+            // Create toggle button
+            const toggleButton = document.createElement('span');
+            toggleButton.textContent = ' [show old]';
+            toggleButton.style.cursor = 'pointer';
+            toggleButton.style.color = '#666';
+            toggleButton.onclick = () => toggleHiddenLove(author, container);
+            
+            // Add toggle button at the end of the author header
+            const authorHeader = node.parentNode.parentNode;
+            // Append the toggle button at the very end
+            authorHeader.appendChild(toggleButton);
+            
+            // Add container after the author's section
+            node.parentNode.parentNode.parentNode.appendChild(container);
+            
+            authorContainers.set(author, container);
+        }
+        
+        // Move node to hidden container
+        const container = authorContainers.get(author);
+        container.appendChild(node);
+    });
 
     // Store the new list of planlove
     await browser.storage.local.set({ [`planloveHash${guessUsername}`]: JSON.stringify(newlove) });
+};
 
-    // Add context menu
-    browser.runtime.onInstalled?.addListener(() => {
-        browser.contextMenus?.create({
-            id: "reset-values",
-            title: "Reset username",
-            contexts: ["action"]
-        });
-        browser.contextMenus?.create({
-            id: "save-unread",
-            title: "Save as unread",
-            contexts: ["action"]
-        });
+// Wait for the polyfill to be loaded
+if (typeof browser === 'undefined') {
+    // If browser is not defined, wait for the polyfill to be ready
+    window.addEventListener('browser-polyfill-ready', () => {
+        init();
     });
-})();
+} else {
+    // If browser is already defined, run immediately
+    init();
+}

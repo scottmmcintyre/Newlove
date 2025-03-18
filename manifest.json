@@ -10,8 +10,7 @@
     }
   },
   "permissions": [
-    "storage",
-    "contextMenus"
+    "storage"
   ],
   "host_permissions": [
     "*://*.grinnellplans.com/*"

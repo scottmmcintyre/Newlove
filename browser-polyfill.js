@@ -9,16 +9,14 @@
                     set: (items) => chrome.storage.local.set(items),
                     remove: (keys) => chrome.storage.local.remove(keys)
                 }
-            },
-            runtime: {
-                onInstalled: chrome.runtime.onInstalled
-            },
-            contextMenus: {
-                create: (options) => chrome.contextMenus?.create(options)
             }
         };
     } else if (typeof browser !== 'undefined') {
         // Firefox already has the browser.* namespace
         global.browser = browser;
     }
+    
+    // Dispatch an event to notify that the polyfill is ready
+    const event = new Event('browser-polyfill-ready');
+    global.dispatchEvent(event);
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this);
